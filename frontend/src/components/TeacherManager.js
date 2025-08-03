@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import moment from 'moment';
+import moment from 'moment-timezone';
 
 const TeacherManager = () => {
   const [teachers, setTeachers] = useState([]);
@@ -48,7 +48,7 @@ const TeacherManager = () => {
       
       setTeacherName('');
       setIsSubstitute(false);
-      setStatus(`Added "${response.data.name}" at ${moment().format('h:mm a')}`);
+      setStatus(`Added "${response.data.name}" at ${moment().tz('America/Toronto').format('h:mm a')}`);
     } catch (error) {
       console.error("Error adding teacher:", error);
       setStatus('Error adding teacher');
@@ -203,7 +203,7 @@ const TeacherManager = () => {
                       </span>
                     </td>
                     <td style={{ padding: '15px', color: '#6c757d' }}>
-                      {moment(teacher.createdAt).format('MMM D, YYYY h:mm a')}
+                      {moment(teacher.createdAt).tz('America/Toronto').format('MMM D, YYYY h:mm a')}
                     </td>
                   </tr>
                 ))}
