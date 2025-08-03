@@ -16,7 +16,7 @@ const TeacherManager = () => {
   const fetchTeachers = async () => {
     setIsLoading(true);
     try {
-      const response = await axios.get('/api/teachers');
+      const response = await axios.get('http://44.202.2.2:8080/api/teachers');
       setTeachers(response.data);
       setStatus(`Loaded ${response.data.length} teachers`);
     } catch (error) {
@@ -38,7 +38,7 @@ const TeacherManager = () => {
       setIsLoading(true);
       setStatus('Adding teacher...');
       
-      const response = await axios.post('/api/teachers', {
+      const response = await axios.post('http://44.202.2.2:8080/api/teachers', {
         name: teacherName,
         isSubstitute
       });
