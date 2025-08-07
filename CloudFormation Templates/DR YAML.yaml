@@ -1,0 +1,417 @@
+Description: Automated DR Solution for substitute-teachers.com
+
+Parameters:
+  ExistingKeyPair:
+    Type: String
+    Description: The name of a Key Pair that is already created in the AWS account
+    Default: Project-KeyPair
+  DREIP:
+    Type: String
+    Description: Enter the allocation ID of an EIP that is already created in the AWS account in the Canada Central region
+    Default: eipalloc-026b9bce6906dc5fe
+
+Resources:
+
+  #DR Region Resources
+  DRVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.3.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: DR-VPC
+
+  #Public Subnet in DR VPC - Resource 3
+  DRVPCPubSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref DRVPC
+      CidrBlock: 10.3.2.0/24
+      AvailabilityZoneId: cac1-az2
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: DR-VPC-Pub-Subnet
+
+  #Private Subnet in DR VPC - Resource 2
+  DRVPCPrivSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref DRVPC
+      CidrBlock: 10.3.1.0/24
+      AvailabilityZoneId: cac1-az2
+      Tags:
+        - Key: Name
+          Value: DR-VPC-Priv-Subnet
+
+  #Private Subnet in DR VPC
+  DRVPCPrivSubnetRedundant:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref DRVPC
+      CidrBlock: 10.3.3.0/24
+      AvailabilityZoneId: cac1-az4
+      Tags:
+        - Key: Name
+          Value: DR-VPC-Priv-Subnet-Redundant
+
+  #Internet Gateway for the DR VPC  - Resource 4
+  DRVPCInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: DR-VPC-InternetGateway
+
+  #Attaching the Internet Gateway to the Dr VPC  - Resource  
+  DRVPCAttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref DRVPC
+      InternetGatewayId: !Ref DRVPCInternetGateway
+
+  #Route table in DR VPC for Public Subnet- Resource 
+  DRVPCPubSubnetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref DRVPC
+      Tags:
+        - Key: Name
+          Value: DR-VPC-Pub-Subnet-Route-Table
+
+  #Route to the IGW - Resource 9
+  DRVPCDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: DRVPCAttachGateway
+    Properties:
+      RouteTableId: !Ref DRVPCPubSubnetRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref DRVPCInternetGateway
+
+  #Route Table Association for Public Subnet in DR VPC
+  DRVPCPubSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DRVPCPubSubnet
+      RouteTableId: !Ref DRVPCPubSubnetRouteTable
+
+  #Elastic IP for for Public Subnet in DR VPC
+  DRVPCNATGatewayEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: DRVPCAttachGateway
+    Properties:
+      Domain: !Ref DRVPC
+      Tags:
+        - Key: Name
+          Value: DRVPC-NAT-Gateway-EIP
+
+  #Public NAT Gateway in DR VPC
+  DRVPCPubNATGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt DRVPCNATGatewayEIP.AllocationId
+      SubnetId: !Ref DRVPCPubSubnet
+      Tags:
+        - Key: Name
+          Value: DRVPC-NAT-Gateway
+
+  #SG in DR VPC for Public Subnet for Internet access - Resource
+  DRVPCPubSubnetSGhttp:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow http and https to client host
+      VpcId: !Ref DRVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: icmp
+          FromPort: 8
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: DR-VPC-Pub-Subnet-SG-http
+
+  #Route table in DR VPC for Private Subnet- Resource 
+  DRVPCPrivSubnetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref DRVPC
+      Tags:
+        - Key: Name
+          Value: DR-VPC-Priv-Subnet-Route-Table
+
+  #Route to the NAT Gateway for Private Subnet - Resource 
+  DRVPCPrivSubnetDefaultRoute:
+    Type: AWS::EC2::Route
+    #DependsOn: DRVPCAttachGateway
+    Properties:
+      RouteTableId: !Ref DRVPCPrivSubnetRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref DRVPCPubNATGateway
+
+  #Route Table Association for Private Subnet in DR VPC
+  DRVPCPrivSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DRVPCPrivSubnet
+      RouteTableId: !Ref DRVPCPrivSubnetRouteTable
+
+  #SG for RDS DB in DR VPC 
+  DRVPCRDSSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref DRVPC
+      GroupDescription: Allow http and https to client host
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref DRVPCBackEndSGhttp
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref DRVPCBackEndSGhttp
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          SourceSecurityGroupId: !Ref DRVPCBackEndSGhttp
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref DRVPCBackEndSGhttp
+        - IpProtocol: icmp
+          FromPort: 8
+          ToPort: -1
+          SourceSecurityGroupId: !Ref DRVPCBackEndSGhttp
+          Description: Allows outbound communication
+      Tags:
+        - Key: Name
+          Value: DR-VPC-Priv-RDS-SG
+
+  #Subnet group for RDS DB in DR VPC
+  DRVPCDBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for RDS DB in Private Subnet
+      SubnetIds:
+        - !Ref DRVPCPrivSubnet
+        - !Ref DRVPCPrivSubnetRedundant
+      Tags:
+        - Key: Name
+          Value: DR-VPC-RDS-DB-Subnet
+
+  #RDS DB in DR Hub VPC
+  DRVPCRDSDB:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: dbinstance3
+      DBName: teacherdb
+      DBInstanceClass: db.t3.micro
+      AllocatedStorage: 20
+      MaxAllocatedStorage: 30
+      AvailabilityZone: ca-central-1b
+      #AutomaticBackupReplicationRegion: ca-central-1
+      DBSubnetGroupName: !Ref DRVPCDBSubnetGroup
+      #PreferredBackupWindow:
+      LicenseModel: postgresql-license
+      Engine: postgres
+      EngineVersion: 15.7
+      MasterUsername: admin1234
+      MasterUserPassword: Finacle2025
+      VPCSecurityGroups:
+        - !Ref DRVPCRDSSG
+      Tags:
+        - Key: Name
+          Value: DR-VPC-RDS-DB
+
+  #SG in DR VPC for backend EC2 for access to frontend EC2 - Resource
+  DRVPCBackEndSGhttp:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow http and https to client host
+      VpcId: !Ref DRVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref DRVPCPubSubnetSGhttp
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref DRVPCPubSubnetSGhttp
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          SourceSecurityGroupId: !Ref DRVPCPubSubnetSGhttp
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          SourceSecurityGroupId: !Ref DRVPCPubSubnetSGhttp
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref DRVPCPubSubnetSGhttp
+        - IpProtocol: icmp
+          FromPort: 8
+          ToPort: -1
+          SourceSecurityGroupId: !Ref DRVPCPubSubnetSGhttp
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          SourceSecurityGroupId: !Ref DRVPCPubSubnetSGhttp
+      Tags:
+        - Key: Name
+          Value: DR-VPC-Priv-Subnet-SG-http
+
+
+  LambdaIAMRoleStackCreate:
+    Type: AWS::IAM::Role
+    DependsOn: DRVPC
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: DRStackCreatePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudformation:CreateStack
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DeleteStack
+                  - cloudformation:UpdateStack
+                Resource: '*' 
+                Condition: 
+                  StringEquals: 
+                    aws:RequestedRegion: ca-central-1
+              - Effect: Allow
+                Action: 
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                  - ec2:AssignPrivateIpAddresses
+                  - ec2:UnassignPrivateIpAddresses
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+                
+
+  #Lambda Function to trigger the stack formation in the DR Region
+  DRTriggerLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaIAMRoleStackCreate.Arn
+      Runtime: python3.9
+      Timeout: 50
+      Code:
+        ZipFile: |
+          from __future__ import print_function
+          import json
+          import boto3
+          import urllib3
+          import cfnresponse
+
+          SUCCESS = "SUCCESS"
+          FAILED = "FAILED"
+
+          http = urllib3.PoolManager()
+
+          print('Loading function')
+          
+          def lambda_handler(event, context):
+              cf = boto3.client('cloudformation', region_name='ca-central-1')
+              
+              try:
+                  stack_exists = False
+                  try:
+                      response = cf.describe_stacks(StackName='DRBackupStack')
+                      stack_exists = True
+                      print("DRBackupStack already exists")
+                  except cf.exceptions.ClientError as e:
+                      if "does not exist" not in str(e):
+                          raise
+                  
+                  is_cfn_event = 'RequestType' in event
+                  
+                  if is_cfn_event and event['RequestType'] == 'Delete':
+                      if stack_exists:
+                          print("Deleting DRBackupStack")
+                          cf.delete_stack(StackName='DRBackupStack')
+                      cfnresponse.send(event, context, SUCCESS)
+                      return
+                      
+                  if stack_exists:
+                      try:
+                          print("Updating existing DRBackupStack")
+                          response = cf.update_stack(
+                              StackName='DRBackupStack',
+                              TemplateURL='https://disasterrecoverybucketcanadacentral.s3.us-east-2.amazonaws.com/backup.yaml',
+                              Capabilities=['CAPABILITY_IAM', 'CAPABILITY_NAMED_IAM']
+                          )
+                      except cf.exceptions.ClientError as e:
+                          if "No updates are to be performed" in str(e):
+                              print("No updates needed for DRBackupStack")
+                          else:
+                              raise
+                  else:
+                      print("Creating new DRBackupStack")
+                      response = cf.create_stack(
+                          StackName='DRBackupStack',
+                          TemplateURL='https://disasterrecoverybucketcanadacentral.s3.us-east-2.amazonaws.com/backup.yaml',
+                          Capabilities=['CAPABILITY_IAM', 'CAPABILITY_NAMED_IAM']
+                      )
+                  if is_cfn_event:
+                      cfnresponse.send(event, context, SUCCESS)
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps('DR stack operation initiated successfully')
+                  }
+                  
+              except Exception as e:
+                  error_message = f"DR deployment failed: {str(e)}"
+                  print(error_message)
+                  
+                  if 'RequestType' in event:
+                      cfnresponse.send(event, context, FAILED, {'Error': error_message})
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps(error_message)
+                  }

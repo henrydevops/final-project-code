@@ -1,0 +1,1269 @@
+Description: Automated DR Solution for substitute-teachers.com
+
+Parameters:
+  ExistingKeyPair:
+    Type: String
+    Description: The name of a Key Pair that is already created in the AWS account
+    Default: Project-KeyPair
+  MainEIP:
+    Type: String
+    Description: Enter the allocation ID of an EIP that is already created in the AWS account in the US East Ohio region
+    Default: eipalloc-003972a133876a13b
+
+Resources:
+
+  #Hub VPC - Resource 1
+  HubVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: Hub-VPC
+
+  #Private Subnet in Hub VPC - Resource 2
+  HubVPCPrivSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref HubVPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZoneId: use2-az1
+      Tags:
+        - Key: Name
+          Value: Hub-VPC-Priv-Subnet
+
+  #Public Subnet in Hub VPC - Resource 3
+  HubVPCPubSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref HubVPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZoneId: use2-az1
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Hub-VPC-Pub-Subnet
+
+  #Public Subnet in Hub VPC - Resource 3
+  HubVPCPubSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref HubVPC
+      CidrBlock: 10.0.3.0/24
+      AvailabilityZoneId: use2-az2
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Hub-VPC-Pub-Subnet2
+
+  #Internet Gateway for the Hub VPC  - Resource 4
+  HubVPCInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: Hub-VPC-InternetGateway
+
+  #Attaching the Internet Gateway to the Hub VPC  - Resource 5 
+  HubVPCAttachInternetGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref HubVPC
+      InternetGatewayId: !Ref HubVPCInternetGateway
+
+  #VPC Peering between the Hub VPC and Spoke 1 VPC - Resource 6
+  VPCPeeringConnectionHubSpoke1:
+    Type: AWS::EC2::VPCPeeringConnection
+    Properties:
+      VpcId: !Ref HubVPC
+      PeerVpcId: !Ref Spoke1VPC
+      Tags:
+        - Key: Name
+          Value: VPC-Peering-Connection-Hub-Spoke1
+
+  #VPC Peering between the Hub VPC and Spoke 2 VPC - Resource 7
+  VPCPeeringConnectionHubSpoke2:
+    Type: AWS::EC2::VPCPeeringConnection
+    Properties:
+      VpcId: !Ref HubVPC
+      PeerVpcId: !Ref Spoke2VPC
+      Tags:
+        - Key: Name
+          Value: VPC-Peering-Connection-Hub-Spoke2
+
+  #Route table in Hub VPC for Private Subnet- Resource 
+  HubVPCPrivSubnetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref HubVPC
+      Tags:
+        - Key: Name
+          Value: Hub-VPC-Priv-Subnet-Route-Table
+
+  #Route to the NAT Gateway- Resource 
+  HubVPCPrivSubnetDefaultRoute:
+    Type: AWS::EC2::Route
+    #DependsOn: HubVPCPubNATGateway
+    Properties:
+      RouteTableId: !Ref HubVPCPrivSubnetRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref HubVPCPubNATGateway
+
+  #Route Table Association for Private Subnet in Hub VPC
+  HubVPCPrivSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref HubVPCPrivSubnet
+      RouteTableId: !Ref HubVPCPrivSubnetRouteTable
+
+  #Route table in Hub VPC for Public Subnet- Resource 
+  HubVPCPubSubnetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref HubVPC
+      Tags:
+        - Key: Name
+          Value: Hub-VPC-Pub-Subnet-Route-Table
+
+  #Route to the Internet Gateway- Resource 
+  HubVPCPubSubnetDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: HubVPCAttachInternetGateway
+    Properties:
+      RouteTableId: !Ref HubVPCPubSubnetRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref HubVPCInternetGateway
+
+  #Route to Spoke1 VPC - Resource 10
+  HubVPCtoSpoke1VPCRoute:
+    Type: AWS::EC2::Route
+    DependsOn: Spoke1VPCAttachTransitGateway
+    Properties:
+      RouteTableId: !Ref HubVPCPubSubnetRouteTable
+      DestinationCidrBlock: 10.1.0.0/16
+      TransitGatewayId: !Ref TransitGateway
+      #VpcPeeringConnectionId: !Ref VPCPeeringConnectionHubSpoke1
+
+  #Route to Spoke 2 VPC - Resource 11
+  HubVPCtoSpoke2VPCRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref HubVPCPubSubnetRouteTable
+      DestinationCidrBlock: 10.2.0.0/16
+      VpcPeeringConnectionId: !Ref VPCPeeringConnectionHubSpoke2
+
+  #Route Table Association for Public Subnet in Hub VPC
+  HubVPCPubSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref HubVPCPubSubnet
+      RouteTableId: !Ref HubVPCPubSubnetRouteTable
+
+  #Elastic IP for Public Subnet in Hub VPC
+  HubVPCNATGatewayEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: HubVPCAttachInternetGateway
+    Properties:
+      Domain: !Ref HubVPC
+      Tags:
+        - Key: Name
+          Value: HubVPC-NAT-Gateway-EIP
+
+  #Public NAT Gateway in Hub VPC
+  HubVPCPubNATGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt HubVPCNATGatewayEIP.AllocationId
+      SubnetId: !Ref HubVPCPubSubnet
+      Tags:
+        - Key: Name
+          Value: HubVPC-NAT-Gateway
+
+  #SG in Hub VPC for Public Subnet for Internet access - Resource
+  HubVPCPubSubnetSGhttp:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow http and https to client host
+      VpcId: !Ref HubVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: Hub-VPC-Pub-Subnet-SG-http
+
+  #SG in Hub VPC for Public Subnet for ping requests 
+  HubVPCPubSubnetSGping:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow ping to client host
+      VpcId: !Ref HubVPC
+      SecurityGroupIngress:
+        - IpProtocol: icmp
+          FromPort: 8
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: Hub-VPC-Pub-Subnet-SG-ping
+
+  #SG in Hub VPC for Public Subnet for ssh requests 
+  HubVPCPubSubnetSGssh:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow ping to client host
+      VpcId: !Ref HubVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: Hub-VPC-Pub-Subnet-SG-ssh
+
+  #Transit Gateway to attach Spokes 1 and 2 to Hub VPC
+  TransitGateway:
+    Type: AWS::EC2::TransitGateway
+    Properties:
+      #Description: "Transit Gateway"
+      AutoAcceptSharedAttachments: disable
+      DefaultRouteTableAssociation: enable
+      DnsSupport: enable
+      Tags:
+        - Key: Name
+          Value: Transit-Gateway
+
+  #Attach Transit Gateway to Hub VPC
+  HubVPCAttachTransitGateway:
+    Type: AWS::EC2::TransitGatewayAttachment
+    Properties:
+      SubnetIds:
+        - !Ref HubVPCPubSubnet
+      TransitGatewayId: !Ref TransitGateway
+      VpcId: !Ref HubVPC
+      Tags:
+        - Key: Name
+          Value: Hub-VPC-Pub-Attach-Transit-Gateway
+    
+  #Referring to the Route Table of the Transit Gateway
+  TransitGatewayRouteTable:
+    Type: AWS::EC2::TransitGatewayRouteTable
+    Properties:
+      TransitGatewayId: !Ref TransitGateway
+      Tags:
+        - Key: Name
+          Value: Transit-Gateway-Route-Table
+
+  #default Route to the Internet Gateway in Spoke1 VPC- Resource 
+  HubVPCDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: HubVPCAttachInternetGateway
+    Properties:
+      RouteTableId: !GetAtt Lambdatrigger.RouteTableID
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref HubVPCInternetGateway
+
+  #Route to Spoke1 VPC the Transit Gateway in - Resource 
+  HubVPCRouteToSpoke1:
+    Type: AWS::EC2::Route
+    DependsOn: HubVPCAttachTransitGateway
+    Properties:
+      RouteTableId: !GetAtt Lambdatrigger.RouteTableID
+      DestinationCidrBlock: 10.1.0.0/16
+      TransitGatewayId: !Ref TransitGateway
+
+  LambdaIAMRole:
+    Type: AWS::IAM::Role
+    DependsOn: HubVPC
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:Describe*
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: arn:aws:logs:*:*:*
+
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaIAMRole.Arn
+      Runtime: python3.9
+      Timeout: 50
+      Code:
+        ZipFile: |
+          from __future__ import print_function
+          import json
+          import boto3
+          import urllib3
+          import cfnresponse
+
+          SUCCESS = "SUCCESS"
+          FAILED = "FAILED"
+
+          http = urllib3.PoolManager()
+
+          print('Loading function')
+          ec2 = boto3.client('ec2')
+
+          def lambda_handler(event, context):
+              print("Received event: " + json.dumps(event, indent=2))
+              responseData={}
+              try:
+                  if event['RequestType'] == 'Delete':
+                      print("Request Type:",event['RequestType'])
+                      print("Delete Request - No Physical resources to delete")
+                  elif event['RequestType'] == 'Create':
+                      print("Request Type:",event['RequestType'])
+                      VPCID=event['ResourceProperties']['VPCID']
+                      RouteTableID=get_vpc(VPCID)
+                      responseData={'RouteTableID':RouteTableID}
+                      print("Sending response to custom resource")
+                  elif event['RequestType'] == 'Update':
+                      print("Request Type:",event['RequestType'])
+                      VPCID=event['ResourceProperties']['VPCID']
+                      RouteTableID=get_vpc(VPCID)
+                      responseData={'RouteTableID':RouteTableID}
+                      print("Sending response to custom resource")
+                  responseStatus = 'SUCCESS'
+                  print("responseStatus: " + responseStatus)
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData, "CustomResourcePhysicalID")
+              except Exception as e:
+                  print('Failed to process:', e)
+                  responseStatus = 'FAILURE'
+                  responseData = {'Failure': 'Something bad happened.'}
+                  cfnresponse.send(event, context, cfnresponse.FAILURE, responseData, "CustomResourcePhysicalID")
+
+          def get_vpc(VPCID):
+              response = ec2.describe_route_tables (
+                Filters=[
+                  {
+                    'Name': 'association.main',
+                    'Values': [ 'true' ]
+                  },
+                  {
+                    'Name': 'vpc-id',
+                    'Values': [ VPCID ]
+                  }
+                ]
+              )
+              print("Printing the VPC Route Table ID ....")
+              RouteTableID=response['RouteTables'][0]['RouteTableId']
+              print(RouteTableID)
+              return RouteTableID
+
+          def send(event, context, responseStatus, responseData, physicalResourceId=None, noEcho=False):
+              responseUrl = event['ResponseURL']
+              print(responseUrl)
+              responseBody = {'Status': responseStatus,
+                              'Reason': 'See the details in CloudWatch Log Stream: ' + context.log_stream_name,
+                              'PhysicalResourceId': physicalResourceId or context.log_stream_name,
+                              'StackId': event['StackId'],
+                              'RequestId': event['RequestId'],
+                              'LogicalResourceId': event['LogicalResourceId'],
+                              'Data': responseData}
+              json_responseBody = json.dumps(responseBody)
+              print("Response body:\n" + json_responseBody)
+              headers = {
+                  'content-type' : '',
+                  'content-length' : str(len(json_responseBody))
+              }
+              try:
+                  response = http.request('PUT', responseUrl, headers=headers, body=json_responseBody)
+                  print("Status code: " + response.reason)
+              except Exception as e:
+                  print("send(..) failed executing requests.put(..): " + str(e))
+
+  Lambdatrigger:
+    Type: Custom::RouteTableLambda
+    Properties:
+      ServiceToken: !GetAtt LambdaFunction.Arn
+      VPCID: !Ref HubVPC
+
+  #ALB Security Group in Hub VPC to allow http and https
+  HubVPCPALBSGhttp:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow http and https to ALB
+      VpcId: !Ref HubVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: Hub-VPC-ALB-SG-http-https
+
+  #Application Load Balancer in Hub VPC
+  HubVPCLB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: Load-Balancer
+      Type: application
+      Scheme: internet-facing
+      Subnets: 
+        - !Ref HubVPCPubSubnet
+        - !Ref HubVPCPubSubnet2
+      SecurityGroups: 
+        - !Ref HubVPCPALBSGhttp
+      LoadBalancerAttributes: 
+        - Key: deletion_protection.enabled
+          Value: false
+  
+  #Target Group for the application Load Balancer in Hub VPC
+  HubVPCLBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: Load-Balancer-target-group
+      Protocol: HTTP
+      Port: 80
+      TargetType: ip
+      VpcId: !Ref HubVPC
+      HealthCheckPath: /healthcheck
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 6
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Matcher: 
+        HttpCode: 200-299
+      Targets:
+        - Id: 10.1.2.11 #replace by EIP of Spoke 1 VPC
+          AvailabilityZone: all
+
+  HTTPlistener:
+    Type: "AWS::ElasticLoadBalancingV2::Listener"
+    Properties:
+      LoadBalancerArn: !Ref HubVPCLB
+      Protocol: "HTTP"
+      Port: 80
+      DefaultActions:
+        - Type: "redirect"
+          RedirectConfig:
+            Protocol: "HTTPS"
+            Port: 443
+            Host: "#{host}"
+            Path: "/#{path}"
+            Query: "#{query}"
+            StatusCode: HTTP_301
+
+  #Spoke 1 VPC Resources
+  Spoke1VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.1.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: Spoke1-VPC
+
+  #Private Subnet in Spoke 1 VPC
+  Spoke1VPCPrivSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Spoke1VPC
+      CidrBlock: 10.1.1.0/24
+      AvailabilityZoneId: use2-az2
+      Tags:
+        - Key: Name
+          Value: Spoke1-VPC-Priv-Subnet
+
+  #Private Subnet in Spoke 1 VPC
+  Spoke1VPCPrivSubnetRedundant:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Spoke1VPC
+      CidrBlock: 10.1.3.0/24
+      AvailabilityZoneId: use2-az1
+      Tags:
+        - Key: Name
+          Value: Spoke1-VPC-Priv-Subnet-Redundant
+
+  #Public Subnet in Spoke 1 VPC
+  Spoke1VPCPubSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Spoke1VPC
+      CidrBlock: 10.1.2.0/24
+      AvailabilityZoneId: use2-az2
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Spoke1-VPC-Pub-Subnet
+
+  #Attach Transit Gateway to Spoke1 VPC
+  Spoke1VPCAttachTransitGateway:
+    Type: AWS::EC2::TransitGatewayAttachment
+    Properties:
+      SubnetIds:
+        - !Ref Spoke1VPCPubSubnet
+      TransitGatewayId: !Ref TransitGateway
+      VpcId: !Ref Spoke1VPC
+      Tags:
+        - Key: Name
+          Value: Spoke1-VPC-Pub-Transit-Gateway
+
+  #Internet Gateway for the Spoke 1 VPC  - Resource
+  Spoke1VPCInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: Spoke1-VPC-InternetGateway
+
+  #Attaching the Internet Gateway to the Spoke 1 VPC  - Resource 
+  Spoke1VPCAttachInternetGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Spoke1VPC
+      InternetGatewayId: !Ref Spoke1VPCInternetGateway
+
+  #Route table in Spoke1 VPC for Public Subnet- Resource 
+  Spoke1VPCPubSubnetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Spoke1VPC
+      Tags:
+        - Key: Name
+          Value: Spoke1-VPC-Pub-Subnet-Route-Table
+
+  #Default Route in Spoke1 VPC to the Transit Gateway- Resource 
+  Spoke1VPCPubSubnetDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: Spoke1VPCAttachInternetGateway
+    Properties:
+      RouteTableId: !Ref Spoke1VPCPubSubnetRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref Spoke1VPCInternetGateway
+
+  #Route Table Association for Public Subnet in Spoke1 VPC
+  Spoke1VPCPubSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref Spoke1VPCPubSubnet
+      RouteTableId: !Ref Spoke1VPCPubSubnetRouteTable
+
+  LambdaIAMRole1:
+    Type: AWS::IAM::Role
+    DependsOn: Spoke1VPC
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:Describe*
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: arn:aws:logs:*:*:*
+
+  LambdaFunction1:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaIAMRole1.Arn
+      Runtime: python3.9
+      Timeout: 50
+      Code:
+        ZipFile: |
+          from __future__ import print_function
+          import json
+          import boto3
+          import urllib3
+          import cfnresponse
+
+          SUCCESS = "SUCCESS"
+          FAILED = "FAILED"
+
+          http = urllib3.PoolManager()
+
+          print('Loading function')
+          ec2 = boto3.client('ec2')
+
+          def lambda_handler(event, context):
+              print("Received event: " + json.dumps(event, indent=2))
+              responseData={}
+              try:
+                  if event['RequestType'] == 'Delete':
+                      print("Request Type:",event['RequestType'])
+                      print("Delete Request - No Physical resources to delete")
+                  elif event['RequestType'] == 'Create':
+                      print("Request Type:",event['RequestType'])
+                      VPCID=event['ResourceProperties']['VPCID']
+                      RouteTableID=get_vpc(VPCID)
+                      responseData={'RouteTableID':RouteTableID}
+                      print("Sending response to custom resource")
+                  elif event['RequestType'] == 'Update':
+                      print("Request Type:",event['RequestType'])
+                      VPCID=event['ResourceProperties']['VPCID']
+                      RouteTableID=get_vpc(VPCID)
+                      responseData={'RouteTableID':RouteTableID}
+                      print("Sending response to custom resource")
+                  responseStatus = 'SUCCESS'
+                  print("responseStatus: " + responseStatus)
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData, "CustomResourcePhysicalID")
+              except Exception as e:
+                  print('Failed to process:', e)
+                  responseStatus = 'FAILURE'
+                  responseData = {'Failure': 'Something bad happened.'}
+                  cfnresponse.send(event, context, cfnresponse.FAILURE, responseData, "CustomResourcePhysicalID")
+
+          def get_vpc(VPCID):
+              response = ec2.describe_route_tables (
+                Filters=[
+                  {
+                    'Name': 'association.main',
+                    'Values': [ 'true' ]
+                  },
+                  {
+                    'Name': 'vpc-id',
+                    'Values': [ VPCID ]
+                  }
+                ]
+              )
+              print("Printing the VPC Route Table ID ....")
+              RouteTableID=response['RouteTables'][0]['RouteTableId']
+              print(RouteTableID)
+              return RouteTableID
+
+          def send(event, context, responseStatus, responseData, physicalResourceId=None, noEcho=False):
+              responseUrl = event['ResponseURL']
+              print(responseUrl)
+              responseBody = {'Status': responseStatus,
+                              'Reason': 'See the details in CloudWatch Log Stream: ' + context.log_stream_name,
+                              'PhysicalResourceId': physicalResourceId or context.log_stream_name,
+                              'StackId': event['StackId'],
+                              'RequestId': event['RequestId'],
+                              'LogicalResourceId': event['LogicalResourceId'],
+                              'Data': responseData}
+              json_responseBody = json.dumps(responseBody)
+              print("Response body:\n" + json_responseBody)
+              headers = {
+                  'content-type' : '',
+                  'content-length' : str(len(json_responseBody))
+              }
+              try:
+                  response = http.request('PUT', responseUrl, headers=headers, body=json_responseBody)
+                  print("Status code: " + response.reason)
+              except Exception as e:
+                  print("send(..) failed executing requests.put(..): " + str(e))
+
+  Lambdatrigger1:
+    Type: Custom::RouteTableLambda
+    Properties:
+      ServiceToken: !GetAtt LambdaFunction1.Arn
+      VPCID: !Ref Spoke1VPC
+
+  #SG in Spoke 1 VPC for Public Subnet for Internet access to EC2 - Resource
+  Spoke1VPCPubSubnetSGhttp:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow http to client host
+      VpcId: !Ref Spoke1VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: Spoke1-VPC-Pub-Subnet-SG-http
+
+  #SG in Spoke 1 VPC for Public Subnet for ping requests to EC2 - Resource
+  Spoke1VPCPubSubnetSGping:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow ping to client host
+      VpcId: !Ref Spoke1VPC
+      SecurityGroupIngress:
+        - IpProtocol: icmp
+          FromPort: 8
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: Spoke1-VPC-Pub-Subnet-SG-ping
+
+  #SG in Spoke 1 VPC for Public Subnet for ssh requests 
+  Spoke1VPCPubSubnetSGssh:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow ping to client host
+      VpcId: !Ref Spoke1VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: Spoke1-VPC-Pub-Subnet-SG-ssh
+
+  #Associate the EIP to the EC2 in Spoke 1 VPC in the public instance DR VPC
+  Spoke1VPCPubSubnetEC2ENIAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !Ref MainEIP
+      InstanceId: !Ref Spoke1VPCPubSubnetInstance
+
+  #EC2 in Spoke 1 Hub VPC in Public Subnet
+  Spoke1VPCPubSubnetInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0197e8c917f1fa3df
+      InstanceType: t2.micro
+      KeyName: !Ref ExistingKeyPair
+      PrivateIpAddress: 10.1.2.11
+      SecurityGroupIds:
+        - !Ref Spoke1VPCPubSubnetSGhttp
+        - !Ref Spoke1VPCPubSubnetSGping
+        - !Ref Spoke1VPCPubSubnetSGssh
+      SubnetId: !Ref Spoke1VPCPubSubnet
+      UserData: !Base64 |
+        #!/bin/bash
+        cd final-project-code/frontend/
+        sudo systemctl daemon-reload
+        sudo systemctl enable teacher-frontend.service
+        sudo systemctl start teacher-frontend.service
+      Tags:
+        - Key: Name
+          Value: Spoke1-VPC-Pub-Subnet-Instance
+
+  #SG in Spoke 1 VPC for Private Subnet for access to public subnet for EC2 - Resource
+  Spoke1VPCPrivSubnetSGhttp:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow http to client host
+      VpcId: !Ref Spoke1VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 10.1.2.0/24
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 10.1.2.0/24
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: 10.1.2.0/24
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 10.1.2.0/24
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 10.1.2.0/24
+      Tags:
+        - Key: Name
+          Value: Spoke1-VPC-Priv-Subnet-SG-http
+
+  #SG in Spoke 1 VPC for Private Subnet for ping requests to EC2 - Resource
+  Spoke1VPCPrivSubnetSGping:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow ping to client host
+      VpcId: !Ref Spoke1VPC
+      SecurityGroupIngress:
+        - IpProtocol: icmp
+          FromPort: 8
+          ToPort: -1
+          CidrIp: 10.1.2.0/24
+      Tags:
+        - Key: Name
+          Value: Spoke1-VPC-Priv-Subnet-SG-ping
+
+  #SG in Spoke 1 VPC for Private Subnet for ssh requests 
+  Spoke1VPCPrivSubnetSGssh:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow ping to client host
+      VpcId: !Ref Spoke1VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 10.1.2.0/24
+      Tags:
+        - Key: Name
+          Value: Spoke1-VPC-Priv-Subnet-SG-ssh
+
+  #EC2 in Spoke 1 Hub VPC in Private Subnet
+  Spoke1VPCPrivSubnetInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0164e7c5e95a874de
+      InstanceType: t2.micro
+      KeyName: !Ref ExistingKeyPair
+      PrivateIpAddress: 10.1.1.11
+      SecurityGroupIds:
+        - !Ref Spoke1VPCPrivSubnetSGhttp
+        - !Ref Spoke1VPCPrivSubnetSGping
+        - !Ref Spoke1VPCPrivSubnetSGssh
+      SubnetId: !Ref Spoke1VPCPrivSubnet
+      #UserData: !Base64 |
+        #!/bin/bash
+      Tags:
+        - Key: Name
+          Value: Spoke1-VPC-Priv-Subnet-Instance  
+
+  #SG for RDS DB in Spoke 1 VPC 
+  Spoke1VPCRDSSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref Spoke1VPC
+      GroupDescription: Allow http and https to client host
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allows outbound communication
+      Tags:
+        - Key: Name
+          Value: Spoke1-VPC-Priv-RDS-SG
+
+  #Subnet group for RDS DB in Spoke 1 Hub VPC
+  Spoke1VPCDBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for RDS DB in Private Subnet
+      SubnetIds:
+        - !Ref Spoke1VPCPrivSubnet
+        - !Ref Spoke1VPCPrivSubnetRedundant
+      Tags:
+        - Key: Name
+          Value: Spoke1-VPC-RDS-DB-Subnet
+
+  #RDS DB in Spoke 1 Hub VPC
+  Spoke1VPCRDSDB:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: dbinstance1
+      DBName: RecruitmentFirm
+      DBInstanceClass: db.t3.micro
+      AllocatedStorage: 20
+      MaxAllocatedStorage: 30
+      AvailabilityZone: us-east-2b
+      AutomaticBackupReplicationRegion: ca-central-1
+      DBSubnetGroupName: !Ref Spoke1VPCDBSubnetGroup
+      #PreferredBackupWindow:
+      LicenseModel: postgresql-license
+      Engine: postgres
+      EngineVersion: 15.7
+      MasterUsername: admin1234
+      MasterUserPassword: Finacle2025
+      VPCSecurityGroups:
+        - !Ref Spoke1VPCRDSSG
+      Tags:
+        - Key: Name
+          Value: Spoke1-VPC-RDS-DB
+
+  #Spoke 2 VPC Resources
+  Spoke2VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.2.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: Spoke2-VPC
+
+  # Private Subnet in Spoke 2 VPC
+  Spoke2VPCPrivSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Spoke2VPC
+      CidrBlock: 10.2.1.0/24
+      AvailabilityZoneId: use2-az3
+      Tags:
+        - Key: Name
+          Value: Spoke2-VPC-Priv-Subnet
+
+  #Private Subnet in Spoke 2 VPC
+  Spoke2VPCPrivSubnetRedundant:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Spoke2VPC
+      CidrBlock: 10.2.3.0/24
+      AvailabilityZoneId: use2-az1
+      Tags:
+        - Key: Name
+          Value: Spoke2-VPC-Priv-Subnet-Redundant
+
+  #Public Subnet in Spoke 2 VPC
+  Spoke2VPCPubSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Spoke2VPC
+      CidrBlock: 10.2.2.0/24
+      AvailabilityZoneId: use2-az3
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Spoke2-VPC-Pub-Subnet
+
+  #Attach Transit Gateway to Spoke2 VPC
+  Spoke2VPCAttachTransitGateway:
+    Type: AWS::EC2::TransitGatewayAttachment
+    Properties:
+      SubnetIds:
+        - !Ref Spoke2VPCPubSubnet
+      TransitGatewayId: !Ref TransitGateway
+      VpcId: !Ref Spoke2VPC
+      Tags:
+        - Key: Name
+          Value: Spoke2-VPC-Pub-Transit-Gateway
+
+  #Route table in Spoke2 VPC for Private Subnet- Resource 
+  Spoke2VPCPubSubnetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Spoke2VPC
+      Tags:
+        - Key: Name
+          Value: Spoke2-VPC-Pub-Subnet-Route-Table
+
+  #Route to the Transit Gateway in Spoke2 VPC- Resource 
+  Spoke2VPCPubSubnetDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: Spoke2VPCAttachTransitGateway
+    Properties:
+      RouteTableId: !Ref Spoke2VPCPubSubnetRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      TransitGatewayId: !Ref TransitGateway
+
+  #Route Table Association for Public Subnet in Spoke2 VPC
+  Spoke2VPCPubSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref Spoke2VPCPubSubnet
+      RouteTableId: !Ref Spoke2VPCPubSubnetRouteTable
+
+  #SG in Spoke 2 VPC for Public Subnet for Internet access to EC2 instance- Resource
+  Spoke2VPCPubSubnetSGhttp:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow http and https to client host
+      VpcId: !Ref Spoke2VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: Spoke2-VPC-Pub-Subnet-SG-http
+
+  #SG in Spoke 2 VPC for Public Subnet for ping requests - Resource
+  Spoke2VPCPubSubnetSGping:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow ping to client host
+      VpcId: !Ref Spoke2VPC
+      SecurityGroupIngress:
+        - IpProtocol: icmp
+          FromPort: 8
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: Spoke2-VPC-Pub-Subnet-SG-ping
+
+  #SG in Spoke 2 VPC for Public Subnet for ssh requests 
+  Spoke2VPCPubSubnetSGssh:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow ping to client host
+      VpcId: !Ref Spoke2VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: Spoke2-VPC-Pub-Subnet-SG-ssh
+
+  #EC2 in Spoke 2 Hub VPC in Public Subnet
+  Spoke2VPCPubSubnetInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0d1b5a8c13042c939
+      InstanceType: t2.micro
+      KeyName: !Ref ExistingKeyPair
+      PrivateIpAddress: 10.2.2.11
+      SecurityGroupIds:
+        - !Ref Spoke2VPCPubSubnetSGhttp
+        - !Ref Spoke2VPCPubSubnetSGping
+        - !Ref Spoke2VPCPubSubnetSGssh
+      SubnetId: !Ref Spoke2VPCPubSubnet
+      Tags:
+        - Key: Name
+          Value: Spoke2-VPC-Pub-Subnet-Instance
+
+  #SG for RDS DB in Spoke 2 VPC 
+  Spoke2VPCRDSSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref Spoke2VPC
+      GroupDescription: Allows traffic from within the same VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allows outbound communication
+      Tags:
+        - Key: Name
+          Value: Spoke2-VPC-Priv-RDS-SG
+
+  #Subnet group for RDS DB in Spoke 2 VPC
+  Spoke2VPCDBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Description of subnet group
+      SubnetIds:
+        - !Ref Spoke2VPCPrivSubnet
+        - !Ref Spoke2VPCPrivSubnetRedundant
+      Tags:
+        - Key: Name
+          Value: Spoke2-VPC-RDS-DB-Subnet
+
+  #RDS DB in Spoke 2 Hub VPC
+  Spoke2VPCRDSDB:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: dbinstance2
+      DBName: RecruitmentFirmPreProd
+      DBInstanceClass: db.t3.micro
+      AllocatedStorage: 20
+      MaxAllocatedStorage: 30
+      AvailabilityZone: us-east-2a
+      AutomaticBackupReplicationRegion: ca-central-1
+      DBSubnetGroupName: !Ref Spoke2VPCDBSubnetGroup
+      #PreferredBackupWindow:
+      LicenseModel: postgresql-license
+      Engine: postgres
+      EngineVersion: 15.7
+      MasterUsername: admin1234
+      MasterUserPassword: Finacle2025
+      VPCSecurityGroups:
+        - !Ref Spoke2VPCRDSSG
+      Tags:
+        - Key: Name
+          Value: Spoke2-VPC-RDS-DB
+
+  #Health Check for Main Region
+  PrimaryHealthCheck:
+    Type: AWS::Route53::HealthCheck
+    Properties:
+      HealthCheckConfig:
+        IPAddress: 3.141.127.191
+        Port: 80
+        Type: HTTP
+        ResourcePath: /health
+        FullyQualifiedDomainName: substitute-teachers.com
+        RequestInterval: 30
+        FailureThreshold: 1
+      HealthCheckTags:
+        - Key: Name
+          Value: Route53-Health-Check
+
+  #Health Check for Main Region
+  SecondaryHealthCheck:
+    Type: AWS::Route53::HealthCheck
+    Properties:
+      HealthCheckConfig:
+        IPAddress: 15.222.124.39
+        Port: 80
+        Type: HTTP
+        ResourcePath: /health
+        FullyQualifiedDomainName: substitute-teachers.com
+        RequestInterval: 30
+        FailureThreshold: 1
+      HealthCheckTags:
+        - Key: Name
+          Value: Route53-Health-Check
+
+  #Route 53 PRIMARY Record
+  MainRegionDNSRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: Z05313381MGAIWIPUKYJV
+      Name: substitute-teachers.com
+      Type: A
+      TTL: 60
+      HealthCheckId: !Ref PrimaryHealthCheck
+      Failover: PRIMARY
+      SetIdentifier: Primary
+      ResourceRecords:
+        - 3.141.127.191
+       #!GetAtt Spoke1VPCPubSubnetInstance.PublicIp
+
+  #Route 53 SECONDARY Record
+  DRDNSRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: Z05313381MGAIWIPUKYJV
+      Name: substitute-teachers.com
+      Type: A
+      TTL: 60
+      HealthCheckId: !Ref SecondaryHealthCheck
+      Failover: SECONDARY
+      SetIdentifier: Secondary
+      ResourceRecords:
+        - 15.222.124.39
+  
+  #Cloud Watch Alarm for the Main Region
+  MainRegionCloudWatchAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmActions:
+        - !Ref CloudWatchAlarmSNSTopic
+        #!GetAtt DRTriggerLambdaFunction.arn
+      MetricName: StatusCheckFailed
+      Namespace: AWS/EC2
+      Statistic: Maximum
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 0
+      EvaluationPeriods: 3
+      Period: 60
+      TreatMissingData: breaching
+      Dimensions:
+        - Name: InstanceId
+          Value: !Ref Spoke1VPCPubSubnetInstance
+  
+  #SNS topic for Cloud Watch Alarm
+  CloudWatchAlarmSNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+        - Endpoint: !GetAtt DRTriggerLambdaFunction.Arn
+          Protocol: lambda
+
+Outputs:
+  RouteTableID:
+    Value: !GetAtt Lambdatrigger.RouteTableID

@@ -1,0 +1,75 @@
+Description: Automated DR Solution for substitute-teachers.com
+
+Parameters:
+  ExistingKeyPair:
+    Type: String
+    Description: The name of a Key Pair that is already created in the AWS account
+    Default: Project-KeyPair
+  DREIP:
+    Type: String
+    Description: Enter the allocation ID of an EIP that is already created in the AWS account in the Canada Central region
+    Default: eipalloc-026b9bce6906dc5fe
+  DRVPC:
+    Type: String
+    Description: Enter the DRVPC ID
+    Default: vpc-0f6187bb4e48410a6
+  DRVPCPubSubnet:
+    Type: String
+    Description: Enter the DRVPCPubSubnetInstance ID
+    Default: subnet-0a58884664d5dce99
+  DRVPCPubSubnetSGhttp:
+    Type: String
+    Description: Enter the DRVPCPubSubnetSGhttp ID
+    Default: sg-05baedc86b6b107ca
+  DRVPCBackEndSGhttp: 
+    Type: String
+    Description: Enter the DRVPCBackEndSGhttp ID
+    Default: sg-0b94e48438995c8d1
+
+Resources:  
+  
+  #Associate the EIP to the EC2 in the public instance DR VPC
+  eniAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !Ref DREIP
+      InstanceId: !Ref DRVPCPubSubnetInstance
+
+  #EC2 in DR VPC in Public Subnet
+  DRVPCPubSubnetInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-008593f70e2e47443
+      InstanceType: t2.micro
+      KeyName: !Ref ExistingKeyPair
+      PrivateIpAddress: 10.3.2.11
+      SecurityGroupIds:
+        - !Ref DRVPCPubSubnetSGhttp
+        #- !Ref DRVPCPubSubnetSGping
+        #- !Ref DRVPCPubSubnetSGssh
+      SubnetId: !Ref DRVPCPubSubnet
+      Tags:
+        - Key: Name
+          Value: DR-VPC-Pub-Subnet-Instance-Front-End
+
+  #EC2 in DR VPC Private in Private Subnet
+  DRVPCPrivSubnetInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-09d72c4bdacce00f4
+      InstanceType: t2.micro
+      KeyName: !Ref ExistingKeyPair
+      PrivateIpAddress: 10.3.2.100
+      SecurityGroupIds:
+        - !Ref DRVPCBackEndSGhttp
+        #- !Ref DRVPCPrivSubnetSGping
+        #- !Ref DRVPCPrivSubnetSGssh
+      SubnetId: !Ref DRVPCPubSubnet
+      UserData:
+          Fn::Base64: !Sub |
+             #!/bin/bash
+             cd final-project-code/backend/target/
+             java -jar teacher-app-0.0.1-SNAPSHOT.jar
+      Tags:
+        - Key: Name
+          Value: DR-VPC-Priv-Subnet-Instance
